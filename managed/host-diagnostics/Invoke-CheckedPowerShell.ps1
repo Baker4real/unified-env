@@ -33,7 +33,7 @@ stdout 必须是单个 JSON 对象，每个字段必须存在且不为 null。�
 .PARAMETER TimeoutSeconds
 目标运行超时，默认 60 秒，范围 1-3600。超时仅请求结束本次创建的进程树。
 .PARAMETER MaxOutputChars
-stdout、stderr 各自回显的字符上限，默认 12000；0 不截断。按全文解析输出的程序传 0。
+stdout、stderr 各自回显的字符上限，默认 8000（未显式指定时另受 UTF-8 8500 字节预算约束）；0 不截断。按全文解析输出的程序传 0。
 .PARAMETER SpillDirectory
 截断时写全文的目录，默认 D:/Codex/temp/checked-powershell。文件不自动清理，也不脱敏。
 .PARAMETER TruncateValidatedJson
@@ -71,7 +71,7 @@ param(
     [ValidateRange(1, 3600)]
     [int]$TimeoutSeconds = 60,
     [ValidateRange(0, 1000000000)]
-    [int]$MaxOutputChars = 12000,
+    [int]$MaxOutputChars = 8000,
     [ValidateNotNullOrEmpty()]
     [string]$SpillDirectory = 'D:/Codex/temp/checked-powershell',
     [Parameter(Position = 1, ValueFromRemainingArguments)]
@@ -733,6 +733,61 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
         if ($element -is [System.Management.Automation.Language.VariableExpressionAst] -and $element.Splatted) { $splatted = $true; break }
     }
     if ($splatted) { continue }
+    # Inline C# struct PROPVARIANT under Add-Type must be 24 bytes on x64; 16-byte Explicit/Sequential layouts silently return empty values or corrupt stack in IPropertyStore.GetValue.
+    if ($name -ieq 'Add-Type') {
+        $csSources = [Collections.Generic.List[string]]::new()
+        foreach ($el in $command.CommandElements | Select-Object -Skip 1) {
+            $cur = Unwrap-SimpleAst $el
+            if ($cur -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                $csSources.Add($cur.Value)
+            } elseif ($cur -is [System.Management.Automation.Language.VariableExpressionAst] -and -not $cur.VariablePath.IsDriveQualified) {
+                $varLookup = ($cur.VariablePath.UserPath -replace '^(?:global|local|script|private):', '').ToLowerInvariant()
+                $varAssigns = @($ast.FindAll({
+                    param($n)
+                    if ($n -isnot [System.Management.Automation.Language.AssignmentStatementAst]) { return $false }
+                    $l = Unwrap-SimpleAst $n.Left
+                    $l -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                        -not $l.VariablePath.IsDriveQualified -and
+                        (($l.VariablePath.UserPath -replace '^(?:global|local|script|private):', '').ToLowerInvariant() -ceq $varLookup)
+                }, $true))
+                if ($varAssigns.Count -eq 1 -and $varAssigns[0].Operator -eq [System.Management.Automation.Language.TokenKind]::Equals) {
+                    $rhsConst = Unwrap-SimpleAst $varAssigns[0].Right
+                    if ($rhsConst -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                        $csSources.Add($rhsConst.Value)
+                    }
+                }
+            }
+        }
+        foreach ($csText in $csSources) {
+            if ($csText -notmatch '\bstruct\s+PROPVARIANT\b') { continue }
+            $cleanCs = [regex]::Replace($csText, '(?m)//[^\r\n]*|/\*[\s\S]*?\*/', '')
+            foreach ($m in [regex]::Matches($cleanCs, '(?s)(?<attrs>(?:\[[^\]]*\]\s*)*)(?:(?:public|internal|private)\s+)?struct\s+PROPVARIANT\b[^{]*\{(?<body>[^}]*)\}')) {
+                $attrs = $m.Groups['attrs'].Value
+                $body = $m.Groups['body'].Value
+                $sizeMatch = [regex]::Match($attrs, '\bSize\s*=\s*(?<sz>\d+)')
+                $explicitSize = if ($sizeMatch.Success) { [int]$sizeMatch.Groups['sz'].Value } else { -1 }
+                $undersized = $false
+                if ($explicitSize -ge 0) {
+                    $undersized = ($explicitSize -lt 24)
+                } elseif ($attrs -match '\bLayoutKind\.Explicit\b') {
+                    $maxOffset = -1
+                    foreach ($fo in [regex]::Matches($body, '\[\s*FieldOffset\s*\(\s*(?<off>\d+)\s*\)\s*\]')) {
+                        $offVal = [int]$fo.Groups['off'].Value
+                        if ($offVal -gt $maxOffset) { $maxOffset = $offVal }
+                    }
+                    if ($maxOffset -lt 16) { $undersized = $true }
+                } else {
+                    $ptrSlots = [regex]::Matches($body, '\b(?:IntPtr|UIntPtr|long|ulong|Int64|UInt64|double|Double|Guid|Decimal|decimal)\b').Count
+                    if ($ptrSlots -lt 2) { $undersized = $true }
+                }
+                if ($undersized) {
+                    [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=UndersizedPropVariantStruct command=Add-Type line={0} column={1}; x64 COM PROPVARIANT is 24 bytes (16-byte layouts silently fail or corrupt stack in IPropertyStore.GetValue); include [FieldOffset(16)] / Size = 24 or two IntPtr union slots after the 8-byte header' -f
+                        $command.Extent.StartLineNumber, $command.Extent.StartColumnNumber))
+                    exit 2
+                }
+            }
+        }
+    }
     # New-ScheduledTaskTrigger -Weekly serializes -At as UTC (...Z), shifting local 00:00-07:59 triggers across weekdays unless .StartBoundary is explicitly assigned without trailing Z.
     if ($name -ieq 'New-ScheduledTaskTrigger') {
         $elements = @($command.CommandElements)
@@ -1035,9 +1090,22 @@ try {
     exit 1
 }
 
-# A stream over MaxOutputChars shows its first two thirds and last third and goes whole to a spill file.
+# A stream over MaxOutputChars (or > 8500 UTF-8 bytes when MaxOutputChars uses its default) shows its first two thirds
+# and last third and goes whole to a spill file, staying below ~10 KB host tool output truncation thresholds.
+$explicitMaxOutputChars = $PSBoundParameters.ContainsKey('MaxOutputChars')
+$defaultMaxOutputUtf8Bytes = 8500
 function Limit-TargetStream([string]$Text, [string]$Stream, [System.Collections.Generic.List[string]]$Notes) {
-    if ($MaxOutputChars -eq 0 -or $Text.Length -le $MaxOutputChars) { return $Text }
+    if ($MaxOutputChars -eq 0) { return $Text }
+    $utf8Bytes = if (-not $explicitMaxOutputChars -and $Text.Length -gt 2800) { $utf8.GetByteCount($Text) } else { 0 }
+    if ($Text.Length -le $MaxOutputChars -and ($explicitMaxOutputChars -or $utf8Bytes -le $defaultMaxOutputUtf8Bytes)) {
+        return $Text
+    }
+    $effectiveMaxChars = $MaxOutputChars
+    if (-not $explicitMaxOutputChars -and $utf8Bytes -gt $defaultMaxOutputUtf8Bytes) {
+        $scaledChars = [int][Math]::Floor([double]$Text.Length * 8000.0 / [double]$utf8Bytes)
+        if ($scaledChars -lt 600) { $scaledChars = 600 }
+        if ($scaledChars -lt $effectiveMaxChars) { $effectiveMaxChars = $scaledChars }
+    }
     $directory = [IO.Path]::GetFullPath($SpillDirectory, $PWD.ProviderPath)
     $spillPath = Join-Path $directory ('{0:yyyyMMddTHHmmssfff}-{1}-{2}.txt' -f [DateTime]::Now, $PID, $Stream)
     try {
@@ -1047,8 +1115,8 @@ function Limit-TargetStream([string]$Text, [string]$Stream, [System.Collections.
         $Notes.Add(('CheckedPowerShell output-spill-error stream={0}: spill file not written; full output shown.' -f $Stream))
         return $Text
     }
-    $headLength = [int][Math]::Floor($MaxOutputChars * 2 / 3)
-    $tailStart = $Text.Length - ($MaxOutputChars - $headLength)
+    $headLength = [int][Math]::Floor($effectiveMaxChars * 2 / 3)
+    $tailStart = $Text.Length - ($effectiveMaxChars - $headLength)
     # Keep surrogate pairs whole at both cuts.
     if ($headLength -gt 0 -and [char]::IsHighSurrogate($Text[$headLength - 1])) { $headLength-- }
     if ([char]::IsLowSurrogate($Text[$tailStart])) { $tailStart++ }

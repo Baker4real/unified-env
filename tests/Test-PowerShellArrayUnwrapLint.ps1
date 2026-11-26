@@ -87,6 +87,31 @@ $result = Invoke-Lint @($broken)
 $codes = @($result.report.findings | ForEach-Object { '{0}:{1}' -f $_.code, $_.path })
 Assert-True ($result.exitCode -eq 1 -and ($codes -join ',') -ceq "parse-error:$broken") "A parse error must be reported, got: $($codes -join ',')"
 
+# A function returning ,$array wrapped again at call site in @(Func ...) produces a 1-element nested array.
+$commaLib = Join-Path $FixtureRoot 'comma-lib.ps1'
+$commaCaller = Join-Path $FixtureRoot 'comma-caller.ps1'
+[System.IO.File]::WriteAllText($commaLib, @'
+function Get-CommaItems {
+    $list = @('a', 'b')
+    return ,$list
+}
+'@, $utf8)
+[System.IO.File]::WriteAllText($commaCaller, @'
+. (Join-Path $PSScriptRoot 'comma-lib.ps1')
+function Get-LocalComma {
+    $items = @('x')
+    return ,$items
+}
+$badDotSourced = @(Get-CommaItems)
+$badLocal = @(Get-LocalComma)
+$goodDirect = Get-CommaItems
+$goodPiped = @(Get-CommaItems | ForEach-Object { $_ })
+'@, $utf8)
+$commaRes = Invoke-Lint @($commaCaller)
+Assert-True ($commaRes.exitCode -eq 1 -and $commaRes.report.errors -eq 2) "Expected 2 double-wrapped-comma-return findings, got $($commaRes.report.errors)"
+Assert-True (@($commaRes.report.findings | Where-Object { $_.code -cne 'double-wrapped-comma-return' }).Count -eq 0) 'Expected double-wrapped-comma-return code'
+Assert-True ($commaRes.report.findings[0].line -eq 6 -and $commaRes.report.findings[1].line -eq 7) 'Expected findings on lines 6 and 7'
+
 # The repository's tracked PowerShell is clean.
 $result = Invoke-Lint
 Assert-True ($result.report.files -gt 0) 'The lint must check the tracked PowerShell files'

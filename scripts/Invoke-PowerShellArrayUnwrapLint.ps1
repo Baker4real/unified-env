@@ -11,7 +11,7 @@ inside it. Write such a value as @(...). Not listed: a target cast to an array t
 wraps the value again; compound assignments such as +=; ,@(...), which keeps the array; and the bare form
 $x = if (...) { @(...) }, whose branches may output scalars on purpose.
 
-Errors: parse-error, subexpression-array-unwrap.
+Errors: parse-error, subexpression-array-unwrap, double-wrapped-comma-return.
 Without -Path it checks every tracked *.ps1 and *.psm1 file of this repository.
 Prints one JSON report and writes nothing; exit 0 when there is no finding, 1 otherwise.
 
@@ -84,6 +84,70 @@ function Test-UnwrapsArray($Value) {
     $null -ne $subExpression -and (Test-OutputsArray $subExpression.SubExpression.Statements)
 }
 
+function Test-IsCommaArrayReturn($ReturnAst) {
+    if ($null -eq $ReturnAst -or $null -eq $ReturnAst.Pipeline) { return $false }
+    $pipe = $ReturnAst.Pipeline
+    if ($pipe -isnot [System.Management.Automation.Language.PipelineAst] -or $pipe.PipelineElements.Count -ne 1) { return $false }
+    $el = $pipe.PipelineElements[0]
+    if ($el -isnot [System.Management.Automation.Language.CommandExpressionAst]) { return $false }
+    $expr = $el.Expression
+    ($expr -is [System.Management.Automation.Language.ArrayLiteralAst] -and $expr.Elements.Count -eq 1 -and $expr.Extent.Text.TrimStart().StartsWith(',')) -or
+        ($expr -is [System.Management.Automation.Language.UnaryExpressionAst] -and $expr.TokenKind -eq [System.Management.Automation.Language.TokenKind]::Comma)
+}
+
+function Get-CommaReturningFunctionNames($Ast) {
+    foreach ($fn in $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+        $returns = @($fn.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.ReturnStatementAst] }, $false))
+        if (@($returns | Where-Object { Test-IsCommaArrayReturn $_ }).Count -gt 0) {
+            $fn.Name
+        }
+    }
+}
+
+function Get-StaticDotSourcedPaths($Ast, [string]$ScriptDirectory) {
+    $paths = [System.Collections.Generic.List[string]]::new()
+    foreach ($cmd in $Ast.FindAll({
+        param($n)
+        $n -is [System.Management.Automation.Language.CommandAst] -and
+            $n.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Dot -and
+            $n.CommandElements.Count -ge 1
+    }, $false)) {
+        $targetAst = $cmd.CommandElements[0]
+        if ($targetAst -is [System.Management.Automation.Language.ParenExpressionAst] -and
+            $targetAst.Pipeline -is [System.Management.Automation.Language.PipelineAst] -and
+            $targetAst.Pipeline.PipelineElements.Count -eq 1 -and
+            $targetAst.Pipeline.PipelineElements[0] -is [System.Management.Automation.Language.CommandAst]) {
+            $joinCmd = $targetAst.Pipeline.PipelineElements[0]
+            if ($joinCmd.GetCommandName() -ieq 'Join-Path' -and $joinCmd.CommandElements.Count -ge 3) {
+                $nonParam = @($joinCmd.CommandElements | Select-Object -Skip 1 | Where-Object { $_ -isnot [System.Management.Automation.Language.CommandParameterAst] })
+                if ($nonParam.Count -ge 2 -and
+                    $nonParam[0] -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                    $nonParam[0].VariablePath.UserPath -ieq 'PSScriptRoot' -and
+                    $nonParam[1] -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                    $cand = [System.IO.Path]::GetFullPath((Join-Path $ScriptDirectory $nonParam[1].Value))
+                    if ([System.IO.File]::Exists($cand)) { $paths.Add($cand) }
+                }
+            }
+        } elseif ($targetAst -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and
+            $targetAst.Value -imatch '^\$PSScriptRoot[\\/](?<rel>[^$"'']+)$') {
+            $cand = [System.IO.Path]::GetFullPath((Join-Path $ScriptDirectory $Matches['rel']))
+            if ([System.IO.File]::Exists($cand)) { $paths.Add($cand) }
+        }
+    }
+    $paths
+}
+
+$astCache = @{}
+function Get-ParsedAst([string]$FullPath) {
+    if ($astCache.ContainsKey($FullPath)) { return $astCache[$FullPath] }
+    $toks = $null
+    $errs = $null
+    $parsed = [System.Management.Automation.Language.Parser]::ParseFile($FullPath, [ref]$toks, [ref]$errs)
+    $entry = [pscustomobject]@{ ast = $parsed; parseErrors = $errs }
+    $astCache[$FullPath] = $entry
+    $entry
+}
+
 $files = @(if ($Path) {
     foreach ($file in $Path) { [pscustomobject]@{ name = $file; fullPath = (Resolve-Path -LiteralPath $file).ProviderPath } }
 } else {
@@ -98,29 +162,60 @@ $files = @(if ($Path) {
 
 $findings = [System.Collections.Generic.List[object]]::new()
 foreach ($file in $files) {
-    $tokens = $null
-    $parseErrors = $null
-    $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.fullPath, [ref]$tokens, [ref]$parseErrors)
+    $parsedEntry = Get-ParsedAst $file.fullPath
+    $ast = $parsedEntry.ast
+    $parseErrors = $parsedEntry.parseErrors
     if ($parseErrors) {
         $findings.Add((New-Finding 'parse-error' $file.name $parseErrors[0].Extent.StartLineNumber $parseErrors[0].Message))
         continue
     }
-    $values = [System.Collections.Generic.List[object]]::new()
+    $fileFindings = [System.Collections.Generic.List[object]]::new()
     foreach ($assignment in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Operator -eq 'Equals' }, $true)) {
         $target = $assignment.Left
         # [string[]]$x = $(...) and [array]$x = $(...) wrap the value again.
         if ($target -is [System.Management.Automation.Language.ConvertExpressionAst] -and
             ($target.Type.TypeName.IsArray -or $target.Type.TypeName.Name -in 'array', 'System.Array')) { continue }
-        if (Test-UnwrapsArray $assignment.Right) { $values.Add([pscustomobject]@{ target = $target.Extent.Text; line = $assignment.Extent.StartLineNumber }) }
+        if (Test-UnwrapsArray $assignment.Right) {
+            $detail = '{0} = $(...) unwraps the array it outputs; use @(...)' -f $target.Extent.Text
+            $fileFindings.Add([pscustomobject]@{ code = 'subexpression-array-unwrap'; line = $assignment.Extent.StartLineNumber; detail = $detail })
+        }
     }
     foreach ($hashtable in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.HashtableAst] }, $true)) {
         foreach ($pair in $hashtable.KeyValuePairs) {
-            if (Test-UnwrapsArray $pair.Item2) { $values.Add([pscustomobject]@{ target = $pair.Item1.Extent.Text; line = $pair.Item2.Extent.StartLineNumber }) }
+            if (Test-UnwrapsArray $pair.Item2) {
+                $detail = '{0} = $(...) unwraps the array it outputs; use @(...)' -f $pair.Item1.Extent.Text
+                $fileFindings.Add([pscustomobject]@{ code = 'subexpression-array-unwrap'; line = $pair.Item2.Extent.StartLineNumber; detail = $detail })
+            }
         }
     }
-    foreach ($value in $values | Sort-Object line) {
-        $detail = '{0} = $(...) unwraps the array it outputs; use @(...)' -f $value.target
-        $findings.Add((New-Finding 'subexpression-array-unwrap' $file.name $value.line $detail))
+    $commaFns = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($fnName in @(Get-CommaReturningFunctionNames $ast)) {
+        [void]$commaFns.Add($fnName)
+    }
+    $scriptDir = [System.IO.Path]::GetDirectoryName($file.fullPath)
+    foreach ($dotPath in @(Get-StaticDotSourcedPaths $ast $scriptDir)) {
+        $dotEntry = Get-ParsedAst $dotPath
+        if (-not $dotEntry.parseErrors) {
+            foreach ($fnName in @(Get-CommaReturningFunctionNames $dotEntry.ast)) {
+                [void]$commaFns.Add($fnName)
+            }
+        }
+    }
+    if ($commaFns.Count -gt 0) {
+        foreach ($arrExpr in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.ArrayExpressionAst] }, $true)) {
+            $stmts = $arrExpr.SubExpression.Statements
+            if ($stmts.Count -ne 1 -or $stmts[0] -isnot [System.Management.Automation.Language.PipelineAst]) { continue }
+            $pipeEls = $stmts[0].PipelineElements
+            if ($pipeEls.Count -ne 1 -or $pipeEls[0] -isnot [System.Management.Automation.Language.CommandAst]) { continue }
+            $calledName = $pipeEls[0].GetCommandName()
+            if ($calledName -and $commaFns.Contains($calledName)) {
+                $detail = '@({0} ...) wraps a function that already returns ,$array into a 1-element nested array; call {0} without @(...)' -f $calledName
+                $fileFindings.Add([pscustomobject]@{ code = 'double-wrapped-comma-return'; line = $arrExpr.Extent.StartLineNumber; detail = $detail })
+            }
+        }
+    }
+    foreach ($item in $fileFindings | Sort-Object line) {
+        $findings.Add((New-Finding $item.code $file.name $item.line $item.detail))
     }
 }
 

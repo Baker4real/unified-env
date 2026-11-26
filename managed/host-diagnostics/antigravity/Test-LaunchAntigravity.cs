@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -264,12 +265,30 @@ internal static class TestLauncher
                 LaunchAntigravity.ResolvePwshPath(null, pwshTree, expectedNewest),
                 null,
                 "ResolvePwshPath preserves null pwshPath");
+
+            // 9. Explicit process AppUserModelID aligns with upstream NSIS shortcut AUMID
+            Expect(
+                LaunchAntigravity.TryApplyProcessAppUserModelId(LaunchAntigravity.CanonicalAppUserModelId).ToString(),
+                bool.TrueString,
+                "TryApplyProcessAppUserModelId sets canonical AUMID");
+            string currentAumid;
+            Expect(
+                GetCurrentProcessExplicitAppUserModelID(out currentAumid).ToString(),
+                "0",
+                "GetCurrentProcessExplicitAppUserModelID succeeds");
+            Expect(
+                currentAumid,
+                "com.google.antigravity",
+                "Explicit process AUMID matches com.google.antigravity");
         }
         finally
         {
             try { Directory.Delete(tmpRoot, true); } catch { }
         }
     }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] out string appID);
 
     private static string ResolveRealPwsh()
     {

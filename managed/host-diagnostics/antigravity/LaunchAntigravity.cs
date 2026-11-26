@@ -2,6 +2,7 @@ using System;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,6 +11,7 @@ using Microsoft.Win32;
 
 internal static class LaunchAntigravity
 {
+    internal const string CanonicalAppUserModelId = "com.google.antigravity";
     private const string AppPath = @"D:\Apps\Google.Antigravity\Antigravity.exe";
     private const string AddonsStateDir = @"D:\Codex\tools\antigravity-addons\state";
     private const string AddonsSyncScript = @"D:\Codex\tools\antigravity-addons\Sync-AntigravityAddons.ps1";
@@ -17,6 +19,23 @@ internal static class LaunchAntigravity
     private const string PwshToolsRoot = @"D:\Codex\tools\PowerShell";
     private const string PwshJunctionFallback = @"C:\Program Files\PowerShell\7\pwsh.exe";
     private const string InternetSettings = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetCurrentProcessExplicitAppUserModelID(string appID);
+
+    internal static bool TryApplyProcessAppUserModelId(string appId)
+    {
+        if (string.IsNullOrWhiteSpace(appId))
+            return false;
+        try
+        {
+            return SetCurrentProcessExplicitAppUserModelID(appId) == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     internal enum ReconcileOutcome
     {
@@ -34,6 +53,7 @@ internal static class LaunchAntigravity
     {
         try
         {
+            TryApplyProcessAppUserModelId(CanonicalAppUserModelId);
             PrepareAddonsForLaunch(AppPath, AddonsStateDir, AddonsSyncScript, PwshPath);
 
             var start = new ProcessStartInfo(AppPath);

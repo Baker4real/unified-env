@@ -1016,6 +1016,111 @@ function Invoke-ProbeHelper {
     }
 }
 
+Assert-Case 'preflight rejects undersized 16-byte C# PROPVARIANT structs and accepts 24-byte layouts' {
+    $badExplicit = @'
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+[StructLayout(LayoutKind.Explicit)]
+public struct PROPVARIANT {
+    [FieldOffset(0)] public ushort vt;
+    [FieldOffset(8)] public IntPtr ptrVal;
+}
+"@
+'PROPVARIANT-SECRET-SENTINEL'
+'@
+    $badSequential = @'
+$cs = '
+using System;
+using System.Runtime.InteropServices;
+[StructLayout(LayoutKind.Sequential)]
+public struct PROPVARIANT {
+    public ushort vt;
+    public ushort w1;
+    public ushort w2;
+    public ushort w3;
+    public IntPtr ptrVal;
+}
+'
+Add-Type -TypeDefinition $cs
+'@
+    foreach ($src in @($badExplicit, $badSequential)) {
+        $res = Invoke-PublicCli @('-CommandText', $src, '-CheckOnly')
+        if ($res.exitCode -ne 2 -or $res.stderr -notmatch 'parameter-error id=UndersizedPropVariantStruct command=Add-Type') {
+            throw "Undersized PROPVARIANT was not rejected: exit=$($res.exitCode) stderr=$($res.stderr)"
+        }
+        if ($res.stdout -or $res.stderr.Contains('PROPVARIANT-SECRET-SENTINEL')) {
+            throw 'UndersizedPropVariantStruct rejection exposed source.'
+        }
+    }
+
+    $goodSequential = @'
+Add-Type -TypeDefinition '
+using System;
+using System.Runtime.InteropServices;
+[StructLayout(LayoutKind.Sequential)]
+public struct PROPVARIANT {
+    public ushort vt;
+    public ushort r1;
+    public ushort r2;
+    public ushort r3;
+    public IntPtr ptrVal;
+    public IntPtr ptrVal2;
+}
+'
+'@
+    $goodExplicitOffset = @'
+Add-Type -TypeDefinition '
+using System;
+using System.Runtime.InteropServices;
+[StructLayout(LayoutKind.Explicit)]
+public struct PROPVARIANT {
+    [FieldOffset(0)] public ushort vt;
+    [FieldOffset(8)] public IntPtr ptrVal;
+    [FieldOffset(16)] public ulong pad;
+}
+'
+'@
+    $goodExplicitSize = @'
+Add-Type -TypeDefinition '
+using System;
+using System.Runtime.InteropServices;
+[StructLayout(LayoutKind.Explicit, Size = 24)]
+public struct PROPVARIANT {
+    [FieldOffset(0)] public ushort vt;
+    [FieldOffset(8)] public IntPtr ptrVal;
+}
+'
+'@
+    foreach ($src in @($goodSequential, $goodExplicitOffset, $goodExplicitSize)) {
+        $ok = Invoke-PublicCli @('-CommandText', $src, '-CheckOnly')
+        if ($ok.exitCode -ne 0) {
+            throw "Valid 24-byte PROPVARIANT was rejected: exit=$($ok.exitCode) stderr=$($ok.stderr)"
+        }
+    }
+}
+
+Assert-Case 'default TruncateValidatedJson spills multi-byte UTF-8 payloads over 8500 bytes even under 8000 chars' {
+    $utf8Spill = Join-Path $fixture 'spill-utf8-budget'
+    $res = Invoke-PublicCli @(
+        '-CommandText', '[pscustomobject]@{ status = "ok"; text = ("中" * 4000) } | ConvertTo-Json -Compress',
+        '-RequiredJsonFields', 'status,text',
+        '-TruncateValidatedJson',
+        '-SpillDirectory', $utf8Spill
+    )
+    $note = [regex]::Match($res.stderr, 'CheckedPowerShell output-truncated stream=stdout shown=\d+ total=\d+ path=(?<path>.+?)\r?$', 'Multiline')
+    if ($res.exitCode -ne 0 -or -not $note.Success -or -not $res.stdout.Contains('[CheckedPowerShell output-truncated:')) {
+        throw "Multi-byte UTF-8 payload over 8500 bytes did not spill under default MaxOutputChars: exit=$($res.exitCode) stderr=$($res.stderr)"
+    }
+    if ($utf8.GetByteCount($res.stdout) -gt 9000) {
+        throw "Truncated stdout UTF-8 byte count exceeded 9000 bytes: $($utf8.GetByteCount($res.stdout))"
+    }
+    $spilled = [IO.File]::ReadAllText($note.Groups['path'].Value, $utf8) | ConvertFrom-Json -ErrorAction Stop
+    if ($spilled.text.Length -ne 4000) {
+        throw 'Spilled multi-byte JSON payload lost characters.'
+    }
+}
+
 $failed = @($cases | Where-Object status -eq 'failed')
 $report = [ordered]@{
     status = if ($failed.Count) { 'failed' } else { 'passed' }

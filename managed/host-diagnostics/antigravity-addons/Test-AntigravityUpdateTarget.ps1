@@ -201,6 +201,11 @@ $defaultStatus = ($defaultStatusRaw | Out-String) | ConvertFrom-Json
 if ($defaultStatus.mode -cne 'Status' -or $null -eq $defaultStatus.updateTarget) {
     throw 'Production default Status invocation returned an unexpected JSON shape.'
 }
+foreach ($scRow in @($defaultStatus.shortcuts)) {
+    if (-not ($scRow.PSObject.Properties.Name -contains 'appUserModelId')) {
+        throw 'Production default Get-ShortcutAudit row is missing appUserModelId.'
+    }
+}
 
 # Regression: NSIS non-silent ExecShellAsUser launches LaunchAntigravity.exe (-Mode Apply) while PostQuit holds
 # the reconcile mutex for >5s building the new version's ASAR. -Mode Apply must wait for PostQuit rather than
@@ -377,6 +382,60 @@ try {
     }
     if ((Test-LauncherProcessRunning) -isnot [bool]) {
         throw 'Production default Test-LauncherProcessRunning must return a boolean.'
+    }
+
+    # Verify Get-ShortcutAudit heals both missing AUMID (pinned running window) and legacy electron.app.Antigravity AUMID,
+    # while leaving unrelated third-party shortcuts untouched.
+    $shortcutFixtureDir = Join-Path $handoffRoot 'shortcut-fixtures'
+    [void][IO.Directory]::CreateDirectory($shortcutFixtureDir)
+    $fakeAppExe = Join-Path $fixtureAppDir 'Antigravity.exe'
+    [IO.File]::WriteAllText($fakeAppExe, 'fake-antigravity-exe', [Text.UTF8Encoding]::new($false))
+    $otherExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
+    $lnkPinnedBare = Join-Path $shortcutFixtureDir 'Antigravity.lnk'
+    $lnkLegacyAumid = Join-Path $shortcutFixtureDir 'Google Antigravity.lnk'
+    $lnkUnrelated = Join-Path $shortcutFixtureDir 'Unrelated.lnk'
+    $wshFixture = New-Object -ComObject WScript.Shell
+    try {
+        $s1 = $wshFixture.CreateShortcut($lnkPinnedBare)
+        $s1.TargetPath = $fakeAppExe
+        $s1.Save()
+
+        $s2 = $wshFixture.CreateShortcut($lnkLegacyAumid)
+        $s2.TargetPath = $fakeLauncherExe
+        $s2.WorkingDirectory = $fixtureAppDir
+        $s2.IconLocation = "$fakeAppExe,0"
+        $s2.Save()
+
+        $s3 = $wshFixture.CreateShortcut($lnkUnrelated)
+        $s3.TargetPath = $otherExe
+        $s3.Save()
+    } finally {
+        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($wshFixture)
+    }
+    Initialize-ShortcutShellInterop
+    [AntigravityAddons.ShortcutShellInterop]::HealShortcut($lnkLegacyAumid, $fakeLauncherExe, $fixtureAppDir, $fakeAppExe, 0, 'electron.app.Antigravity')
+
+    $auditBefore = Get-ShortcutAudit -CandidatePathsForTest @($lnkPinnedBare, $lnkLegacyAumid, $lnkUnrelated) `
+        -LauncherPath $fakeLauncherExe -TargetAppDir $fixtureAppDir -TargetAppExe $fakeAppExe
+    if ($auditBefore.Count -ne 3 -or
+        -not $auditBefore[0].needsHeal -or $null -ne $auditBefore[0].appUserModelId -or
+        -not $auditBefore[1].needsHeal -or $auditBefore[1].appUserModelId -cne 'electron.app.Antigravity' -or
+        $auditBefore[2].needsHeal) {
+        throw 'Get-ShortcutAudit pre-heal classification did not flag bare/legacy AUMID shortcuts and spare unrelated shortcut.'
+    }
+
+    $auditHealed = Get-ShortcutAudit -Heal -CandidatePathsForTest @($lnkPinnedBare, $lnkLegacyAumid, $lnkUnrelated) `
+        -LauncherPath $fakeLauncherExe -TargetAppDir $fixtureAppDir -TargetAppExe $fakeAppExe
+    if (-not $auditHealed[0].healed -or $auditHealed[0].target -ine $fakeLauncherExe -or $auditHealed[0].appUserModelId -cne 'com.google.antigravity' -or
+        -not $auditHealed[1].healed -or $auditHealed[1].target -ine $fakeLauncherExe -or $auditHealed[1].appUserModelId -cne 'com.google.antigravity' -or
+        $auditHealed[2].healed -or $auditHealed[2].target -ine $otherExe) {
+        throw 'Get-ShortcutAudit -Heal did not align managed shortcuts to LaunchAntigravity.exe + com.google.antigravity.'
+    }
+
+    $auditIdempotent = Get-ShortcutAudit -Heal -CandidatePathsForTest @($lnkPinnedBare, $lnkLegacyAumid, $lnkUnrelated) `
+        -LauncherPath $fakeLauncherExe -TargetAppDir $fixtureAppDir -TargetAppExe $fakeAppExe
+    if (($auditIdempotent.healed -contains $true) -or ($auditIdempotent.needsHeal -contains $true)) {
+        throw 'Get-ShortcutAudit -Heal was not idempotent on aligned shortcuts.'
     }
 
     # Verify governed Deploy-AntigravityAddons.ps1 default Check path (zero seam overrides) and isolated Check/Apply/Check cycle.

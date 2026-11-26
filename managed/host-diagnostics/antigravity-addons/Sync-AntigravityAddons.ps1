@@ -27,6 +27,7 @@ if ([string]::IsNullOrWhiteSpace($StateDir)) {
 $AppExe = Join-Path $AppDir 'Antigravity.exe'
 $AppAsar = Join-Path $AppDir 'resources\app.asar'
 $LauncherExe = Join-Path $BackupDir 'LaunchAntigravity.exe'
+$CanonicalAppUserModelId = 'com.google.antigravity'
 $ProductRegistryKey = 'Software\121a0be4-63bd-531e-acf8-fc3924c7e984'
 $UninstallRegistryKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\121a0be4-63bd-531e-acf8-fc3924c7e984'
 
@@ -35,11 +36,153 @@ function Initialize-ShortcutShellInterop {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace AntigravityAddons {
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct PROPERTYKEY {
+        public Guid fmtid;
+        public uint pid;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PROPVARIANT {
+        public ushort vt;
+        public ushort wReserved1;
+        public ushort wReserved2;
+        public ushort wReserved3;
+        public IntPtr ptrVal;
+        public IntPtr ptrVal2;
+    }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore {
+        int GetCount(out uint cProps);
+        int GetAt(uint iProp, out PROPERTYKEY pkey);
+        int GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+        int SetValue(ref PROPERTYKEY key, ref PROPVARIANT propvar);
+        int Commit();
+    }
+
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IShellLinkW {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cchMaxPath, IntPtr pfd, uint fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cchMaxName);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cchMaxPath);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cchMaxPath);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+        void Resolve(IntPtr hwnd, uint fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport, Guid("0000010b-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPersistFile {
+        void GetClassID(out Guid pClassID);
+        [PreserveSig] int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+    }
+
+    public sealed class ShortcutSnapshot {
+        public string TargetPath;
+        public string WorkingDirectory;
+        public string IconLocation;
+        public string AppUserModelId;
+    }
+
     public static class ShortcutShellInterop {
+        private static readonly Guid ShellLinkClsid = new Guid("00021401-0000-0000-C000-000000000046");
+        private static readonly Guid AppUserModelFmtId = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+
+        [DllImport("ole32.dll")]
+        private static extern int PropVariantClear(ref PROPVARIANT pvar);
+
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern void SHChangeNotify(int wEventId, uint uFlags, string dwItem1, IntPtr dwItem2);
+
+        private static string ReadAppUserModelId(IPropertyStore store) {
+            if (store == null) return null;
+            var pk = new PROPERTYKEY { fmtid = AppUserModelFmtId, pid = 5 };
+            PROPVARIANT pv = new PROPVARIANT();
+            if (store.GetValue(ref pk, out pv) != 0) return null;
+            try {
+                if (pv.vt == 31 && pv.ptrVal != IntPtr.Zero) {
+                    return Marshal.PtrToStringUni(pv.ptrVal);
+                }
+                return null;
+            } finally {
+                PropVariantClear(ref pv);
+            }
+        }
+
+        private static void WriteAppUserModelId(IPropertyStore store, string aumid) {
+            var pk = new PROPERTYKEY { fmtid = AppUserModelFmtId, pid = 5 };
+            PROPVARIANT pv = new PROPVARIANT();
+            pv.vt = 31;
+            pv.ptrVal = Marshal.StringToCoTaskMemUni(aumid ?? string.Empty);
+            try {
+                int hr = store.SetValue(ref pk, ref pv);
+                if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+            } finally {
+                PropVariantClear(ref pv);
+            }
+        }
+
+        public static ShortcutSnapshot ReadShortcut(string lnkPath) {
+            object obj = Activator.CreateInstance(Type.GetTypeFromCLSID(ShellLinkClsid));
+            try {
+                ((IPersistFile)obj).Load(lnkPath, 0);
+                var sl = (IShellLinkW)obj;
+                var sbTarget = new StringBuilder(1024);
+                sl.GetPath(sbTarget, sbTarget.Capacity, IntPtr.Zero, 0);
+                var sbWork = new StringBuilder(1024);
+                sl.GetWorkingDirectory(sbWork, sbWork.Capacity);
+                var sbIcon = new StringBuilder(1024);
+                int iconIdx;
+                sl.GetIconLocation(sbIcon, sbIcon.Capacity, out iconIdx);
+                string iconLoc = sbIcon.Length > 0 ? (sbIcon.ToString() + "," + iconIdx) : string.Empty;
+                return new ShortcutSnapshot {
+                    TargetPath = sbTarget.ToString(),
+                    WorkingDirectory = sbWork.ToString(),
+                    IconLocation = iconLoc,
+                    AppUserModelId = ReadAppUserModelId((IPropertyStore)obj)
+                };
+            } finally {
+                Marshal.ReleaseComObject(obj);
+            }
+        }
+
+        public static void HealShortcut(string lnkPath, string targetPath, string workingDir, string iconExePath, int iconIndex, string aumid) {
+            object obj = Activator.CreateInstance(Type.GetTypeFromCLSID(ShellLinkClsid));
+            try {
+                var pf = (IPersistFile)obj;
+                pf.Load(lnkPath, 2);
+                var sl = (IShellLinkW)obj;
+                sl.SetPath(targetPath);
+                sl.SetWorkingDirectory(workingDir);
+                sl.SetIconLocation(iconExePath, iconIndex);
+                var ps = (IPropertyStore)obj;
+                WriteAppUserModelId(ps, aumid);
+                int hrCommit = ps.Commit();
+                if (hrCommit != 0) Marshal.ThrowExceptionForHR(hrCommit);
+                pf.Save(lnkPath, true);
+            } finally {
+                Marshal.ReleaseComObject(obj);
+            }
+        }
 
         public static void NotifyItemUpdated(string itemPath, string parentDir) {
             const int SHCNE_UPDATEITEM = 0x00002000;
@@ -77,51 +220,61 @@ function Invoke-ReconcilerJson {
 }
 
 function Get-ShortcutAudit {
-    param([switch]$Heal)
-    $taskBarDir = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
-    $candidates = @(
-        (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Google Antigravity.lnk'),
-        (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Antigravity.lnk'),
-        (Join-Path ([Environment]::GetFolderPath('Programs')) 'Antigravity.lnk'),
-        (Join-Path ([Environment]::GetFolderPath('Programs')) 'Google Antigravity.lnk'),
-        (Join-Path $taskBarDir 'Antigravity.lnk'),
-        (Join-Path $taskBarDir 'Google Antigravity.lnk')
+    param(
+        [switch]$Heal,
+        [string[]]$CandidatePathsForTest = $null,
+        [string]$LauncherPath = $LauncherExe,
+        [string]$TargetAppDir = $AppDir,
+        [string]$TargetAppExe = $AppExe,
+        [string]$ExpectedAppUserModelId = $CanonicalAppUserModelId
     )
-    $wsh = New-Object -ComObject WScript.Shell
+    $taskBarDir = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
+    $candidates = if ($null -ne $CandidatePathsForTest) {
+        @($CandidatePathsForTest)
+    } else {
+        @(
+            (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Google Antigravity.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Antigravity.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('Programs')) 'Antigravity.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('Programs')) 'Google Antigravity.lnk'),
+            (Join-Path $taskBarDir 'Antigravity.lnk'),
+            (Join-Path $taskBarDir 'Google Antigravity.lnk')
+        )
+    }
+    Initialize-ShortcutShellInterop
+    $expectedIcon = "$TargetAppExe,0"
     $results = @()
-    try {
-        foreach ($lnkPath in $candidates) {
-            if (-not (Test-Path -LiteralPath $lnkPath -PathType Leaf)) {
-                continue
-            }
-            $sc = $wsh.CreateShortcut($lnkPath)
-            $beforeTarget = [string]$sc.TargetPath
-            $beforeIcon = [string]$sc.IconLocation
-            $needsHeal = ($beforeTarget -ine $LauncherExe) -and (
-                $beforeTarget -ieq $AppExe -or
-                $beforeTarget -match '(?i)\\antigravity\\Antigravity\.exe$'
-            )
-            $healed = $false
-            if ($Heal -and $needsHeal -and (Test-Path -LiteralPath $LauncherExe -PathType Leaf)) {
-                $sc.TargetPath = $LauncherExe
-                $sc.WorkingDirectory = $AppDir
-                $sc.IconLocation = "$AppExe,0"
-                $sc.Save()
-                Initialize-ShortcutShellInterop
-                [AntigravityAddons.ShortcutShellInterop]::NotifyItemUpdated($lnkPath, [IO.Path]::GetDirectoryName($lnkPath))
-                $healed = $true
-                $needsHeal = $false
-            }
-            $results += [pscustomobject]@{
-                path = $lnkPath
-                target = $(if ($healed) { $LauncherExe } else { $beforeTarget })
-                icon = $(if ($healed) { "$AppExe,0" } else { $beforeIcon })
-                healed = $healed
-                needsHeal = $needsHeal
-            }
+    foreach ($lnkPath in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($lnkPath) -or -not (Test-Path -LiteralPath $lnkPath -PathType Leaf)) {
+            continue
         }
-    } finally {
-        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($wsh)
+        $snap = [AntigravityAddons.ShortcutShellInterop]::ReadShortcut($lnkPath)
+        $beforeTarget = [string]$snap.TargetPath
+        $beforeIcon = [string]$snap.IconLocation
+        $beforeAumid = $snap.AppUserModelId
+        $isManagedShortcut = ($beforeTarget -ieq $LauncherPath) -or
+            ($beforeTarget -ieq $TargetAppExe) -or
+            ($beforeTarget -match '(?i)\\antigravity\\Antigravity\.exe$')
+        $needsHeal = $isManagedShortcut -and (
+            ($beforeTarget -ine $LauncherPath) -or
+            ($beforeIcon -ine $expectedIcon) -or
+            ($beforeAumid -cne $ExpectedAppUserModelId)
+        )
+        $healed = $false
+        if ($Heal -and $needsHeal -and (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) {
+            [AntigravityAddons.ShortcutShellInterop]::HealShortcut($lnkPath, $LauncherPath, $TargetAppDir, $TargetAppExe, 0, $ExpectedAppUserModelId)
+            [AntigravityAddons.ShortcutShellInterop]::NotifyItemUpdated($lnkPath, [IO.Path]::GetDirectoryName($lnkPath))
+            $healed = $true
+            $needsHeal = $false
+        }
+        $results += [pscustomobject]@{
+            path = $lnkPath
+            target = $(if ($healed) { $LauncherPath } else { $beforeTarget })
+            icon = $(if ($healed) { $expectedIcon } else { $beforeIcon })
+            appUserModelId = $(if ($healed) { $ExpectedAppUserModelId } else { $beforeAumid })
+            healed = $healed
+            needsHeal = $needsHeal
+        }
     }
     return ,$results
 }

@@ -1,6 +1,6 @@
 # Antigravity 桌面启动维护
 
-桌面入口通过 `LaunchAntigravity.exe` 读取当前用户启用的 Windows 手动 HTTP(S) 代理，并把它交给新进程。切换代理后需要冷启动。代理切换和快捷方式目标回归由主机诊断的 `diagnostics` profile 执行。启动器源码见 [LaunchAntigravity.cs](LaunchAntigravity.cs)。
+桌面入口通过 `LaunchAntigravity.exe` 显式绑定 `com.google.antigravity`（`SetCurrentProcessExplicitAppUserModelID`），读取当前用户启用的 Windows 手动 HTTP(S) 代理并把它交给新进程，与主进程 `app.setAppUserModelId` / `win.setAppDetails` 及快捷方式 `PKEY_AppUserModel_ID` 保持单任务栏图标对齐。切换代理后需要冷启动。代理切换、AUMID 绑定和快捷方式目标回归由主机诊断的 `diagnostics` profile 执行。启动器源码见 [LaunchAntigravity.cs](LaunchAntigravity.cs)。
 
 在本仓库根目录用受管部署入口 `managed/host-diagnostics/antigravity-addons/Deploy-AntigravityAddons.ps1` 检查或原子发布启动器与扩展对账器（自动在 D 盘证据目录内用 `.NET Framework csc.exe` 编译 `LaunchAntigravity.exe`、留存备份与哈希回读 `manifest.json`）。重新部署前先跑 `node ./scripts/Run-PowerShellTests.cjs --module host-safety --profile diagnostics --only AntigravityDesktopContracts`，并通过原快捷方式复测。
 

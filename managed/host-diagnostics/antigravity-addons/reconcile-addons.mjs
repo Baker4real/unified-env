@@ -1364,8 +1364,10 @@ async function applyContextViewerLayer({ hostVersion, origUtils, origPreload, st
 }
 
 // ---------------------------------------------------------------------------
-// Layer 5: updater relaunch hand-off (dist/updater.js)
+// Layer 5: updater relaunch hand-off & Windows taskbar AUMID alignment (dist/updater.js)
 // ---------------------------------------------------------------------------
+
+const CANONICAL_APP_USER_MODEL_ID = 'com.google.antigravity';
 
 function applyUpdaterLayer(origSource, postQuitHookPath, launcherPath, stageDir) {
   if (!postQuitHookPath || !launcherPath) {
@@ -1373,18 +1375,54 @@ function applyUpdaterLayer(origSource, postQuitHookPath, launcherPath, stageDir)
   }
   const newline = origSource.includes('\r\n') ? '\r\n' : '\n';
   const norm = origSource.replace(/\r\n/g, '\n');
+  const electronAnchor = 'const electron_1 = require("electron");';
   const anchor = [
     '            await killLanguageServer();',
     '            electron_updater_1.autoUpdater.quitAndInstall(isSilent, true);',
     '            launched = Boolean(updater.quitAndInstallCalled);',
   ].join('\n');
 
-  if (countOccurrences(norm, anchor) !== 1) {
-    return { status: 'skipped', reason: 'Upstream dist/updater.js quitAndInstall anchor changed' };
+  if (countOccurrences(norm, electronAnchor) !== 1 || countOccurrences(norm, anchor) !== 1) {
+    return { status: 'skipped', reason: 'Upstream dist/updater.js electron or quitAndInstall anchor changed' };
   }
 
+  const aumidLiteral = JSON.stringify(CANONICAL_APP_USER_MODEL_ID);
   const hookLiteral = JSON.stringify(toPosix(postQuitHookPath));
   const launcherLiteral = JSON.stringify(toPosix(launcherPath));
+  const electronReplacement = [
+    'const electron_1 = require("electron");',
+    '(() => {',
+    "    if (process.platform !== 'win32' || !electron_1 || !electron_1.app) return;",
+    `    const aumid = ${aumidLiteral};`,
+    `    const launcherExe = ${launcherLiteral};`,
+    '    try {',
+    "        if (typeof electron_1.app.setAppUserModelId === 'function') {",
+    '            electron_1.app.setAppUserModelId(aumid);',
+    '        }',
+    '    } catch (_agyAumidErr) {}',
+    "    if (typeof electron_1.app.on === 'function') {",
+    "        electron_1.app.on('browser-window-created', (_event, win) => {",
+    '            try {',
+    "                if (!win || win.isDestroyed?.() || typeof win.setAppDetails !== 'function') return;",
+    "                const _agyFs = require('fs');",
+    "                const _agyPath = require('path');",
+    '                const winPath = _agyPath.win32 || _agyPath;',
+    '                const details = { appId: aumid };',
+    "                if (typeof process.execPath === 'string' && process.execPath) {",
+    '                    details.appIconPath = winPath.normalize(process.execPath);',
+    '                    details.appIconIndex = 0;',
+    '                }',
+    '                if (launcherExe && _agyFs.existsSync(launcherExe)) {',
+    '                    const normLauncher = winPath.normalize(launcherExe);',
+    '                    details.relaunchCommand = `"${normLauncher}"`;',
+    "                    details.relaunchDisplayName = 'Antigravity';",
+    '                }',
+    '                win.setAppDetails(details);',
+    '            } catch (_agyWinDetailsErr) {}',
+    '        });',
+    '    }',
+    '})();',
+  ].join('\n');
   const replacement = [
     '            await killLanguageServer();',
     '            let __agyDelegatedHookVbs = null;',
@@ -1427,13 +1465,29 @@ function applyUpdaterLayer(origSource, postQuitHookPath, launcherPath, stageDir)
     '            }',
   ].join('\n');
 
-  const patched = norm.replace(anchor, () => replacement).replace(/\n/g, newline);
+  const patched = norm
+    .replace(electronAnchor, () => electronReplacement)
+    .replace(anchor, () => replacement)
+    .replace(/\n/g, newline);
   verifyNodeSyntax(patched, stageDir, 'dist/updater.js');
 
   const runFixture = async ({ filesPresent, installSucceeds }) => {
     const spawns = [];
     const quitCalls = [];
-    const appObj = { isPackaged: true, getVersion: () => '2.35.0', quit: () => {} };
+    let assignedAumid = null;
+    let capturedAppDetails = null;
+    const appListeners = new Map();
+    const appObj = {
+      isPackaged: true,
+      getVersion: () => '2.35.0',
+      quit: () => {},
+      setAppUserModelId(id) {
+        assignedAumid = id;
+      },
+      on(ev, cb) {
+        appListeners.set(ev, cb);
+      },
+    };
     const autoUpdater = {
       installerPath: 'C:\\updater\\Antigravity-x64.exe',
       autoRunAppAfterInstall: true,
@@ -1475,15 +1529,32 @@ function applyUpdaterLayer(origSource, postQuitHookPath, launcherPath, stageDir)
         if (!Object.hasOwn(deps, name)) throw new Error(`Unexpected updater require: ${name}`);
         return deps[name];
       },
-      process: { platform: 'win32', arch: 'x64', pid: 1234, env: {} },
+      process: {
+        platform: 'win32',
+        arch: 'x64',
+        pid: 1234,
+        execPath: 'D:\\Apps\\Google.Antigravity\\Antigravity.exe',
+        env: {},
+      },
       console: { log() {}, warn() {}, error() {} },
       setTimeout,
       clearInterval,
       setInterval,
     }, { filename: 'dist/updater.js' });
+    const onWinCreated = appListeners.get('browser-window-created');
+    if (onWinCreated) {
+      onWinCreated({}, {
+        isDestroyed: () => false,
+        setAppDetails(d) {
+          capturedAppDetails = d;
+        },
+      });
+    }
     await exp.quitAndInstall(false);
-    return { spawns, quitCalls, appObj, autoUpdater };
+    return { spawns, quitCalls, appObj, autoUpdater, assignedAumid, capturedAppDetails };
   };
+
+  const expectedNormLauncher = (path.win32 || path).normalize(launcherPath);
 
   return {
     status: 'ready',
@@ -1491,6 +1562,13 @@ function applyUpdaterLayer(origSource, postQuitHookPath, launcherPath, stageDir)
     verifyAsync: async () => {
       const delegated = await runFixture({ filesPresent: true, installSucceeds: true });
       if (
+        delegated.assignedAumid !== CANONICAL_APP_USER_MODEL_ID ||
+        !delegated.capturedAppDetails ||
+        delegated.capturedAppDetails.appId !== CANONICAL_APP_USER_MODEL_ID ||
+        delegated.capturedAppDetails.relaunchCommand !== `"${expectedNormLauncher}"` ||
+        delegated.capturedAppDetails.relaunchDisplayName !== 'Antigravity' ||
+        delegated.capturedAppDetails.appIconPath !== 'D:\\Apps\\Google.Antigravity\\Antigravity.exe' ||
+        delegated.capturedAppDetails.appIconIndex !== 0 ||
         delegated.quitCalls.length !== 1 ||
         delegated.quitCalls[0][1] !== false ||
         delegated.quitCalls[0][2] !== false ||
@@ -1499,11 +1577,15 @@ function applyUpdaterLayer(origSource, postQuitHookPath, launcherPath, stageDir)
         !delegated.spawns[0][1].includes('--relaunch') ||
         delegated.appObj.__zhcnUpdaterRelaunchHandedOff !== true
       ) {
-        throw new Error('Updater delegated relaunch behavioral gate failed');
+        throw new Error('Updater delegated relaunch or taskbar AUMID behavioral gate failed');
       }
 
       const fallback = await runFixture({ filesPresent: false, installSucceeds: true });
       if (
+        fallback.assignedAumid !== CANONICAL_APP_USER_MODEL_ID ||
+        !fallback.capturedAppDetails ||
+        fallback.capturedAppDetails.appId !== CANONICAL_APP_USER_MODEL_ID ||
+        fallback.capturedAppDetails.relaunchCommand !== undefined ||
         fallback.quitCalls.length !== 1 ||
         fallback.quitCalls[0][1] !== true ||
         fallback.quitCalls[0][2] !== true ||
@@ -1593,6 +1675,7 @@ function detectAddonMarkers(entries, body) {
   check('dist/preload.js', 'Antigravity Context Meter preload Injection Start', 'context-viewer-preload');
   check('dist/utils.js', 'Antigravity Context Meter utils Injection Start', 'context-viewer-utils');
   check('dist/updater.js', '__zhcnUpdaterRelaunchHandedOff', 'updater-relaunch');
+  check('dist/updater.js', CANONICAL_APP_USER_MODEL_ID, 'taskbar-aumid');
   check('dist/wsl.js', 'HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Lxss', 'wsl');
   return markers;
 }
@@ -2041,6 +2124,7 @@ async function main() {
 }
 
 export {
+  CANONICAL_APP_USER_MODEL_ID,
   applyUpdaterLayer,
   applyWslLayer,
   detectAddonMarkers,

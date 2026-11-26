@@ -34,7 +34,7 @@ const EXPECTED_LS_SHA = 'cc94d648c39a67c293d0fdc8befc51e953d1a8f55617bf49fff6988
 const LAUNCHER_TEST = path.join(SCRIPT_DIR, '../antigravity/Test-AntigravityLauncher.ps1');
 const VENDOR_ROOT = 'D:/Codex/tools/antigravity-addons';
 const ALL_LAYERS = ['contextViewer', 'language', 'pulse', 'updater', 'wsl'];
-const ALL_MARKERS = ['context-viewer-preload', 'context-viewer-utils', 'desktop-zhcn', 'pulse', 'updater-relaunch', 'wsl'];
+const ALL_MARKERS = ['context-viewer-preload', 'context-viewer-utils', 'desktop-zhcn', 'pulse', 'taskbar-aumid', 'updater-relaunch', 'wsl'];
 
 function sha256(buf) {
   return createHash('sha256').update(buf).digest('hex');
@@ -382,7 +382,7 @@ async function runUnitTests() {
     );
     console.log('UNIT PASS 1: packAsarWithOverlay replacement, addition, and untouched readback');
 
-    // Unit 2: detectAddonMarkers detects all 6 markers (including escaped Lxss path & updater relaunch) and empty on clean ASAR
+    // Unit 2: detectAddonMarkers detects all 7 markers (including escaped Lxss path, updater relaunch & taskbar AUMID) and empty on clean ASAR
     const cleanUnpacked = unpackAsar(baseAsar);
     assert.deepEqual(detectAddonMarkers(walkAsar(cleanUnpacked.header), cleanUnpacked.body), []);
 
@@ -390,15 +390,15 @@ async function runUnitTests() {
       'dist/customScheme.js': "callback({ redirectURL: 'agy-zhcn://bundle/main.js' });",
       'dist/preload.js': '// AGY_CONTEXT_CAPSULE_START\n// Antigravity Context Meter preload Injection Start\n',
       'dist/utils.js': '// Antigravity Context Meter utils Injection Start\n',
-      'dist/updater.js': 'electron_1.app.__zhcnUpdaterRelaunchHandedOff = true;\n',
+      'dist/updater.js': "electron_1.app.setAppUserModelId('com.google.antigravity');\nelectron_1.app.__zhcnUpdaterRelaunchHandedOff = true;\n",
       'dist/wsl.js': "const key = 'HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Lxss';\n",
     });
     const patchedUnpacked = unpackAsar(patchedAsar);
     assert.deepEqual(
       detectAddonMarkers(walkAsar(patchedUnpacked.header), patchedUnpacked.body).sort(),
-      ['context-viewer-preload', 'context-viewer-utils', 'desktop-zhcn', 'pulse', 'updater-relaunch', 'wsl'],
+      ALL_MARKERS,
     );
-    console.log('UNIT PASS 2: detectAddonMarkers detects all 6 markers accurately');
+    console.log('UNIT PASS 2: detectAddonMarkers detects all 7 markers accurately');
 
     // Unit 3: detectHubLoadAnchor handles 2.34.0, legacy, future signature, and refuses absent/ambiguous
     assert.equal(
@@ -942,6 +942,8 @@ async function runE2eTests() {
     assert.ok(!customSchemeSrc.includes('agy_zhcn_autofollow_hook.json'), 'Old userData hook path still present');
     const updaterSrc = unpackAsarMember(fs.readFileSync(patchedAsarPath), 'dist/updater.js').toString('utf8');
     assert.ok(updaterSrc.includes('__zhcnUpdaterRelaunchHandedOff'), 'Updater relaunch hand-off missing');
+    assert.ok(updaterSrc.includes('setAppUserModelId') && updaterSrc.includes('com.google.antigravity'), 'Updater canonical AUMID binding missing');
+    assert.ok(updaterSrc.includes('setAppDetails'), 'Updater window relaunch details binding missing');
     assert.ok(!fs.existsSync(path.join(r1.stageDir, '.work')), '.work staging dir was not cleaned up');
     assert.ok(fs.existsSync(path.join(r1.stageDir, 'result.json')), 'Audit receipt missing');
 
