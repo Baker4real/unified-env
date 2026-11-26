@@ -1121,6 +1121,50 @@ Assert-Case 'default TruncateValidatedJson spills multi-byte UTF-8 payloads over
     }
 }
 
+Assert-Case 'preflight rejects Start-Process -Wait -PassThru piped into downstream consumers' {
+    $invalidCases = @(
+        "Start-Process -FilePath 'D:/app/tool.exe' -ArgumentList '--check' -Wait -PassThru | Select-Object ExitCode | ConvertTo-Json -Compress; 'WAIT-PIPE-SECRET-SENTINEL'",
+        "saps 'C:/Windows/System32/cmd.exe' -ArgumentList '/c exit 7' -Wait -PassThru | ForEach-Object { `$_.ExitCode }"
+    )
+    foreach ($src in $invalidCases) {
+        $res = Invoke-PublicCli @('-CommandText', $src, '-CheckOnly')
+        if ($res.exitCode -ne 2 -or $res.stderr -notmatch 'parameter-error id=StartProcessWaitPipelineOrder command=Start-Process') {
+            throw "Piped Start-Process -Wait -PassThru was not rejected ($src): exit=$($res.exitCode) stderr=$($res.stderr)"
+        }
+        if ($res.stdout -or $res.stderr.Contains('WAIT-PIPE-SECRET-SENTINEL')) {
+            throw 'StartProcessWaitPipelineOrder rejection exposed source.'
+        }
+    }
+    $validCases = @(
+        "`$p = Start-Process -FilePath 'D:/app/tool.exe' -Wait -PassThru; `$p.ExitCode",
+        "Start-Process -FilePath 'D:/app/tool.exe' -Wait -PassThru | Out-Null",
+        "Start-Process -FilePath 'D:/app/tool.exe' -PassThru | Select-Object Id"
+    )
+    foreach ($src in $validCases) {
+        $ok = Invoke-PublicCli @('-CommandText', $src, '-CheckOnly')
+        if ($ok.exitCode -ne 0) {
+            throw "Valid Start-Process usage was rejected ($src): exit=$($ok.exitCode) stderr=$($ok.stderr)"
+        }
+    }
+}
+
+Assert-Case 'Add-Type compilation errors expose Roslyn CS codes and coordinates without source identifiers' {
+    $badAddType = @'
+Add-Type -TypeDefinition @"
+public class SecretTypeDoNotEcho {
+    public static int SecretFieldDoNotEcho = "bad-string-do-not-echo";
+}
+"@
+'@
+    $res = Invoke-PublicCli @('-CommandText', $badAddType)
+    if ($res.exitCode -ne 1 -or $res.stderr -notmatch 'compilerErrors=CS0029@\d+:\d+') {
+        throw "Add-Type compilation failure did not report CS0029@line:col: exit=$($res.exitCode) stderr=$($res.stderr)"
+    }
+    if (($res.stdout + $res.stderr) -match 'SecretTypeDoNotEcho|SecretFieldDoNotEcho|bad-string-do-not-echo') {
+        throw 'Add-Type compiler diagnostic leaked source identifiers or string literals.'
+    }
+}
+
 $failed = @($cases | Where-Object status -eq 'failed')
 $report = [ordered]@{
     status = if ($failed.Count) { 'failed' } else { 'passed' }

@@ -851,6 +851,42 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
             }
         }
     }
+    # Start-Process emits its -PassThru Process object before entering -Wait; downstream pipeline stages therefore read HasExited=$false and ExitCode=$null.
+    if ($name -iin @('Start-Process', 'saps', 'start')) {
+        $elements = @($command.CommandElements)
+        $hasWait = $false
+        $hasPassThru = $false
+        foreach ($el in $elements) {
+            if ($el -is [System.Management.Automation.Language.CommandParameterAst]) {
+                $argText = if ($null -ne $el.Argument) { $el.Argument.Extent.Text.Trim() } else { '' }
+                if ($argText -ieq '$false' -or $argText -eq '0') { continue }
+                if ($el.ParameterName.Length -ge 3 -and 'Wait'.StartsWith($el.ParameterName, [StringComparison]::OrdinalIgnoreCase)) {
+                    $hasWait = $true
+                } elseif ($el.ParameterName.Length -ge 2 -and 'PassThru'.StartsWith($el.ParameterName, [StringComparison]::OrdinalIgnoreCase)) {
+                    $hasPassThru = $true
+                }
+            }
+        }
+        if ($hasWait -and $hasPassThru -and $command.Parent -is [System.Management.Automation.Language.PipelineAst]) {
+            $pipeStages = @($command.Parent.PipelineElements)
+            $cmdIdx = [Array]::IndexOf($pipeStages, $command)
+            if ($cmdIdx -ge 0 -and ($cmdIdx + 1) -lt $pipeStages.Count) {
+                $downstreamNonNull = $false
+                for ($dsIdx = $cmdIdx + 1; $dsIdx -lt $pipeStages.Count; $dsIdx++) {
+                    $dsStage = $pipeStages[$dsIdx]
+                    if ($dsStage -isnot [System.Management.Automation.Language.CommandAst] -or $dsStage.GetCommandName() -ine 'Out-Null') {
+                        $downstreamNonNull = $true
+                        break
+                    }
+                }
+                if ($downstreamNonNull) {
+                    [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=StartProcessWaitPipelineOrder command=Start-Process line={0} column={1}; Start-Process writes -PassThru before -Wait completes so downstream pipeline stages read HasExited=$false and ExitCode=$null; assign $p = Start-Process ... -Wait -PassThru first, then read $p.ExitCode' -f
+                        $command.Extent.StartLineNumber, $command.Extent.StartColumnNumber))
+                    exit 2
+                }
+            }
+        }
+    }
     # Analytic/Diagnostic event logs reject forward-reverse reads without -Oldest; FilterHashtable Id accepts <= 22 entries.
     if ($name -ieq 'Get-WinEvent') {
         if ($null -eq $winEventSingleAssignVars) {
@@ -1043,9 +1079,28 @@ try {
         $innerType = $cause.GetType().FullName
     }
     $nativeErrorCode = if ($cause -is [ComponentModel.Win32Exception]) { [int]$cause.NativeErrorCode } else { '-' }
-    [Console]::Error.WriteLine(('CheckedPowerShell runtime-error type={0} category={1} script={2} line={3} column={4} innerType={5} hresult={6} nativeErrorCode={7}' -f
+    $compilerSuffix = ''
+    if ($_.FullyQualifiedErrorId -like '*AddTypeCommand*' -or
+        ($_.InvocationInfo -and $_.InvocationInfo.MyCommand -and $_.InvocationInfo.MyCommand.Name -eq 'Add-Type')) {
+        $csTokens = [Collections.Generic.List[string]]::new()
+        foreach ($rec in (@($_) + @($global:Error | Select-Object -First 12))) {
+            if ($null -eq $rec -or $null -eq $rec.Exception) { continue }
+            if ($rec.FullyQualifiedErrorId -notlike '*AddTypeCommand*' -and $rec -ne $_) { continue }
+            $msgText = [string]$rec.Exception.Message
+            foreach ($cm in [regex]::Matches($msgText, '\((?<ln>\d+),(?<col>\d+)\):\s*error\s+(?<code>CS\d{4})\b')) {
+                $tok = '{0}@{1}:{2}' -f $cm.Groups['code'].Value, $cm.Groups['ln'].Value, $cm.Groups['col'].Value
+                if (-not $csTokens.Contains($tok)) { $csTokens.Add($tok) }
+                if ($csTokens.Count -ge 6) { break }
+            }
+            if ($csTokens.Count -ge 6) { break }
+        }
+        if ($csTokens.Count -gt 0) {
+            $compilerSuffix = ' compilerErrors=' + ($csTokens -join ',')
+        }
+    }
+    [Console]::Error.WriteLine(('CheckedPowerShell runtime-error type={0} category={1} script={2} line={3} column={4} innerType={5} hresult={6} nativeErrorCode={7}{8}' -f
         $_.Exception.GetType().FullName, $_.CategoryInfo.Category, $scriptName, $line, $column,
-        $innerType, [int]$cause.HResult, $nativeErrorCode))
+        $innerType, [int]$cause.HResult, $nativeErrorCode, $compilerSuffix))
     exit 1
 }
 '@
