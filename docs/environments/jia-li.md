@@ -208,6 +208,13 @@ intent: 记录家里设备的受控环境事实与差异
 - 每周六凌晨 02:00 自动重启计划任务 `\WeeklySaturdayReboot`（`SYSTEM/Highest` + `shutdown.exe /g` ARSO 自动登录锁屏恢复关灯与常驻项）：管理脚本在 `D:\agents\projects\misc\outputs\weekly-saturday-reboot-20261122\Manage-WeeklySaturdayReboot.ps1`，注册证据见 `D:\agents\run-evidence\weekly-saturday-reboot\20261122-register\evidence.json`。
 - Antigravity `context-viewer` 账本与用量归档由 `reconcile-addons.mjs` 重定向至 `D:\Codex\tools\antigravity-addons\state\context\`（不再写 `C:\Users\WINDOWS\.gemini\antigravity`）；五盘空间清理与腾讯视频（`QQLive`）下载缓存路径纠偏（`HKCU\Software\Tencent\QQLive\Download\path` 从故障 `F:` 盘改至 `D:\QLDownload\下载剧集快捷方式\`）证据见 `D:\agents\run-evidence\antigravity-addons\20261124-ledger-and-qqlive-closeout\summary.json`。
 
+## 本机便携模拟器与 Switch 静态重编译目录（2026-11-26）
+
+- `D:\Apps\Cemu`：便携模式运行，配置真源为 `D:\Apps\Cemu\portable\settings.xml`（根目录无 `settings.xml`）。
+- `D:\Apps\TotK-Recomp` 与 `D:\Apps\BotW-Recomp`（`Savage Wind Recomp v0.6.0-alpha.6`）：均通过各自目录的无窗口原生启动器 `Start-TotK.exe` / `Start-BotW.exe`（桌面快捷方式指向启动器）将工作目录、数据根、`__GL_SHADER_DISK_CACHE_PATH`（`cache\nv-driver-cache`）与 `TEMP`/`TMP`（`cache\temp`）固定在 `D:\`，保持 `C:` 盘零缓存写入；便携模组管理器 `SWMM v0.2.0` 位于 `D:\Apps\SWMM\swmm.exe`。
+- 本机可用 Win32 C 编译工具链：`D:\Apps\TotK-Recomp\build-kit\llvm\bin\x86_64-w64-mingw32-clang.exe`（含完整 MinGW-w64 系统导入库）；`D:\Apps\BotW-Recomp\zig\zig.exe` 为上游裁剪版重编译器运行时（不含 `user32`/`kernel32` 导入库，不可直接编译通用 Win32 程序）。
+- 显示器（`Samsung Odyssey Neo G7` `SAM72B0` `3840×2160`，Windows HDR 校准 ICC `MHC2` 峰值 `2000 nits`）搭配 RTX 5070 Ti 的 `BotW-Recomp` 4K DLSS 4 + HDR10 配置与本机 `vk_precompiled.bin` 预编译验收快照见 `D:\agents\run-evidence\botw-recomp-retro-20261127\evidence.json`。
+
 ## 跨设备同步与验收
 
 1. 先同步本仓库的已提交默认分支，不复制调用端的 dirty worktree。

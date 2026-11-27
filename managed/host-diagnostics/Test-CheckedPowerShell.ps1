@@ -1165,6 +1165,35 @@ public class SecretTypeDoNotEcho {
     }
 }
 
+Assert-Case 'preflight diagnoses unquoted comma after parameter token on native compiler flags without exposing source' {
+    $invalidCases = @(
+        "& 'D:/Apps/BotW-Recomp/zig/zig.exe' cc -O2 -municode -Wl,/subsystem:windows 'D:/Apps/BotW-Recomp/Start-BotW.c'; 'COMPILER-COMMA-SECRET-SENTINEL'",
+        "& 'clang.exe' -O2 -Wl,--subsystem,windows main.c",
+        "clang.exe -fsanitize=address,undefined main.c",
+        "zig.exe build -Dtarget=x86_64-windows,gnu"
+    )
+    foreach ($src in $invalidCases) {
+        $res = Invoke-PublicCli @('-CommandText', $src, '-CheckOnly')
+        if ($res.exitCode -ne 2 -or $res.stderr -notmatch 'syntax-error reason=unquoted-parameter-comma id=MissingArgument line=1 column=\d+') {
+            throw "Unquoted parameter comma was not diagnosed ($src): exit=$($res.exitCode) stderr=$($res.stderr)"
+        }
+        if ($res.stdout -or $res.stderr.Contains('COMPILER-COMMA-SECRET-SENTINEL')) {
+            throw 'Unquoted parameter comma rejection exposed source.'
+        }
+    }
+    $validCases = @(
+        "& 'D:/Apps/BotW-Recomp/zig/zig.exe' cc -O2 -municode '-Wl,/subsystem:windows' 'D:/Apps/BotW-Recomp/Start-BotW.c'",
+        "& 'clang.exe' -O2 '-fsanitize=address,undefined' main.c",
+        "Write-Output 1,2,3"
+    )
+    foreach ($src in $validCases) {
+        $ok = Invoke-PublicCli @('-CommandText', $src, '-CheckOnly')
+        if ($ok.exitCode -ne 0) {
+            throw "Valid quoted compiler flag or array expression was rejected ($src): exit=$($ok.exitCode) stderr=$($ok.stderr)"
+        }
+    }
+}
+
 $failed = @($cases | Where-Object status -eq 'failed')
 $report = [ordered]@{
     status = if ($failed.Count) { 'failed' } else { 'passed' }

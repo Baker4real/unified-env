@@ -122,8 +122,17 @@ try {
 }
 if ($parseErrors.Count) {
     foreach ($parseError in $parseErrors) {
-        [Console]::Error.WriteLine(('CheckedPowerShell syntax-error id={0} line={1} column={2}' -f
-            $parseError.ErrorId, $parseError.Extent.StartLineNumber, $parseError.Extent.StartColumnNumber))
+        $reasonPart = ''
+        $hintPart = ''
+        if ($parseError.ErrorId -eq 'MissingArgument' -and $parseError.Extent.Text -eq ',' -and $null -ne $tokens) {
+            $prevToken = @($tokens | Where-Object { $_.Extent.EndOffset -eq $parseError.Extent.StartOffset }) | Select-Object -First 1
+            if ($null -ne $prevToken -and $prevToken.Kind -eq [System.Management.Automation.Language.TokenKind]::Parameter) {
+                $reasonPart = ' reason=unquoted-parameter-comma'
+                $hintPart = '; PowerShell splits unquoted '','' after ''-flag'' (quote the whole argument, e.g. ''-Wl,/subsystem:windows'')'
+            }
+        }
+        [Console]::Error.WriteLine(('CheckedPowerShell syntax-error{0} id={1} line={2} column={3}{4}' -f
+            $reasonPart, $parseError.ErrorId, $parseError.Extent.StartLineNumber, $parseError.Extent.StartColumnNumber, $hintPart))
     }
     exit 2
 }
