@@ -87,8 +87,10 @@ class PreflightSummaryTests(unittest.TestCase):
             full = (run / report['status_evidence']).read_bytes()
             self.assertEqual(full, git('status', '--porcelain=v1', '-z', '--untracked-files=all'))
             self.assertEqual(report['status_sha256'], hashlib.sha256(full).hexdigest())
+            self.assertEqual((run / 'skills-worktree.json').read_bytes(), result.stdout)
             self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
             self.assertEqual((run / report['status_evidence']).read_bytes(), full)
+            self.assertEqual((run / 'skills-worktree.json').read_bytes(), result.stdout)
 
     def test_final_cli_stdout_uses_budgeted_utf8_with_lf(self):
         result = subprocess.run([sys.executable, '-B', str(ROOT / 'scripts/daily-update/preflight-summary.py'),

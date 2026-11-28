@@ -224,7 +224,7 @@ python scripts/daily-update/preflight-summary.py runtime-command --component npm
 
 返回最多 6000 UTF-8 字节，裁剪明示 `omitted_count`。proxy 只显示 loopback 监听、PID/进程名和脱敏配置一致性，不枚举连接；`ok` 表示端口可唯一确定，`three_faces_consistent` 单独表示 Git、User HTTPS_PROXY 与监听是否一致。runtime-command 返回 argv 数组；npm/npx 固定映射到 `--runtime node --aliases npm npx`，与 Node 分开传 expected version。执行仍使用上文 runtime-health 的三 shell 验收，不用该 recipe 声称已完成验收。
 
-`worktree` 输出变更分类计数、代表路径及 `dirty_age_gate_failed`。保存摘要作为当次前置验收 JSON。`skills-worktree.porcelain.z` 保留 Git 的原始 NUL 分隔清单，摘要记录文件 SHA-256。恢复时读取已登记的摘要。同一运行目录的原始清单采用首次写入。
+`worktree` 输出变更分类计数、代表路径及 `dirty_age_gate_failed`，并自动以 create-only 写入 `skills-worktree.json`，内容与 stdout 完全一致。`skills-worktree.porcelain.z` 保留 Git 的原始 NUL 分隔清单，摘要记录文件 SHA-256。恢复时读取已登记的摘要。同一运行目录的原始清单和摘要均采用首次写入，不覆盖。
 
 ## 当日成功结果发布
 

@@ -139,6 +139,21 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(self.head(), self.base)
         self.assertEqual(self.status(), [" M a.txt"])
 
+    def test_private_tree_diff_check_catches_new_file_eof_blank_line_before_commit(self) -> None:
+        self.write("new-recipe.md", b"body\n\n")
+        code, error = self.run_helper("--file", "new-recipe.md", sha256(b"body\n\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("git diff --check", error)
+        self.assertIn("new blank line at EOF", error)
+        self.assertEqual(self.head(), self.base)
+        self.assertEqual(self.status(), ["?? new-recipe.md"])
+
+        self.write("new-recipe.md", b"body\n")
+        code, error = self.run_helper("--file", "new-recipe.md", sha256(b"body\n"))
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.show("HEAD:new-recipe.md"), b"body\n")
+        self.assertEqual(self.status(), [])
+
     def test_rejects_when_head_moved(self) -> None:
         self.write("b.txt", b"b2\n")
         self.git("commit", "-q", "-am", "other session")

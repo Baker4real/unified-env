@@ -465,8 +465,10 @@ def candidate_result(status, binding, receipt, candidate, active, payload, candi
                 changed_paths=samples, omitted_path_count=len(changed) - len(samples))
 
 
-def validate_line_endings(payload, incoming, staged=None):
+def validate_line_endings(payload, incoming, staged=None, unchanged=None):
     for path, data in sorted(payload.items()):
+        if unchanged and path in unchanged and staged is not None and payload.get(path) == staged.get(path):
+            continue  # Zero-payload upstream: preserving the active bytes introduces no line-ending drift.
         if path == SOURCE or not isinstance(data, bytes) or b'\r\n' not in data:
             continue
         try:
@@ -497,6 +499,7 @@ def stage_or_verify(action, config_path, reviewed_path=None):
     git = Git(repo)
     old_tree = git.subtree(config['old_commit'], config['upstream_path']) if config['mode'] == 'update' else None
     new_tree = git.subtree(config['new_commit'], config['upstream_path'])
+    before = git.read_tree(old_tree) if old_tree is not None else None
     binding = dict(config, old_tree=old_tree, new_tree=new_tree)
     scope = Path('skills/staging') / config['name']
     receipt = evidence_path(writer, scope / 'receipt.json')
@@ -529,14 +532,15 @@ def stage_or_verify(action, config_path, reviewed_path=None):
         if json.dumps(record, sort_keys=True) != json.dumps(expected_record, sort_keys=True):
             raise StageError('invalid-receipt')
         incoming = git.read_tree(new_tree)
-        validate_line_endings(payload, incoming, active)
+        unchanged = {path for path in incoming if before is not None and before.get(path) == incoming[path]}
+        validate_line_endings(payload, incoming, active, unchanged)
         if reviewed is None:
             return candidate_result(status, binding, receipt, candidate, active, payload, candidate_seal)
         review_payload = read_disk_tree(reviewed)
         require_file(review_payload, SKILL, 'invalid-reviewed-candidate')
         if review_payload.get(SOURCE) != payload.get(SOURCE):
             raise StageError('candidate-provenance-drift')
-        validate_line_endings(review_payload, incoming, payload)
+        validate_line_endings(review_payload, incoming, payload, unchanged)
         result = candidate_result('reviewed', binding, receipt, reviewed, active, review_payload, seal(review_payload))
         result['skill_md_sha256'] = hashlib.sha256(review_payload[SKILL]).hexdigest()
         return result
@@ -551,7 +555,6 @@ def stage_or_verify(action, config_path, reviewed_path=None):
     if config['mode'] == 'update':
         require_file(active, SKILL, 'active-skill-missing')
         require_file(active, SOURCE, 'active-source-missing')
-        before = git.read_tree(old_tree)
         require_file(before, SKILL, 'upstream-baseline-missing')
     elif active is not None:
         raise StageError('active-skill-already-exists')
@@ -560,7 +563,8 @@ def stage_or_verify(action, config_path, reviewed_path=None):
     candidate = evidence_path(writer, attempt.relative_to(writer.root) / 'candidate')
     payload = replay_overlay(git, attempt, before, active, incoming) if old_tree is not None else incoming
     require_file(payload, SKILL, 'candidate-skill-missing')
-    validate_line_endings(payload, incoming, active)
+    unchanged = {path for path in incoming if before is not None and before.get(path) == incoming[path]}
+    validate_line_endings(payload, incoming, active, unchanged)
     candidate_seal = seal(payload)
     materialize(candidate, payload)
     if seal(read_disk_tree(candidate)) != candidate_seal:

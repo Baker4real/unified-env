@@ -150,6 +150,28 @@ class SkillCandidateStagingTests(unittest.TestCase):
         self.assertEqual((abandoned / 'sentinel').read_bytes(), b'untrusted interrupted attempt')
         self.assertEqual(first_receipt.read_bytes(), original_bytes)
 
+    def test_zero_payload_update_preserves_active_mixed_crlf_but_rejects_new_drift(self):
+        self.put(self.upstream, 'SKILL.md', BASE_SKILL)
+        old = self.commit()
+        self.put(self.repo, 'release-metadata.md', b'CLI-only release change\n')
+        new = self.commit()
+        mixed = BASE_SKILL.replace(b'one\n', b'one\r\n').replace(b'three\n', b'three\r\n')
+        self.put(self.local, 'SKILL.md', mixed)
+        self.put(self.local, 'SOURCE.md', SOURCE)
+        cfg = self.config(old, new)
+        staged = self.ready(cfg)
+        candidate = Path(staged['candidate_path'])
+        self.assertEqual((candidate / 'SKILL.md').read_bytes(), mixed)
+        self.assertEqual(staged['changed_path_count'], 0)
+        self.ready(cfg, status='verified', action='verify')
+
+        review = self.run / 'review' / 'sample'
+        self.put(review, 'SKILL.md', mixed.replace(b'\n', b'\r\n'))
+        self.put(review, 'SOURCE.md', SOURCE)
+        result = self.invoke(cfg, 'verify', '--reviewed-candidate', str(review))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['status'], 'candidate-line-ending-crlf')
+
     def test_reviewed_copy_rejects_crlf_drift_and_preserves_official_crlf(self):
         self.put(self.upstream, 'SKILL.md', BASE_SKILL)
         official = b'official one\r\nofficial two\r\n'

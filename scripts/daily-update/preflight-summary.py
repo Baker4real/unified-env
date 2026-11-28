@@ -202,6 +202,11 @@ def main():
         else:
             result = dict(ok=True, argv=runtime_recipe(args.component, args.expected_version))
         output = bounded_json(result, args.max_bytes)
+        if args.mode == 'worktree':
+            evidence_spec = importlib.util.spec_from_file_location('daily_evidence', BASE / 'evidence_io.py')
+            evidence_module = importlib.util.module_from_spec(evidence_spec)
+            evidence_spec.loader.exec_module(evidence_module)
+            evidence_module.RunEvidence(args.run_directory).write_text_new('skills-worktree.json', output + '\n')
         sys.stdout.buffer.write(output.encode('utf-8') + b'\n')
         return 0 if json.loads(output)['ok'] else 1
     except (OSError, ValueError, KeyError, subprocess.SubprocessError):

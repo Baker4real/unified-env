@@ -6,8 +6,10 @@ prepared.  This helper builds the commit in a private index seeded from the
 expected HEAD, so only the named paths change: each file is read once, checked
 against its reviewed SHA-256, and those same bytes become the blob (through the
 repository's clean filters, as ``git add`` would apply them).  ``git commit``
-runs with its normal hooks.  Afterwards only the committed paths are refreshed
-in the shared index; other sessions' staged and unstaged work stays put.  The
+runs with its normal hooks.  Before that commit, ``git diff --check`` must pass
+between the expected HEAD and the new private tree, including newly added files.
+Afterwards only the committed paths are refreshed in the shared index; other
+sessions' staged and unstaged work stays put.  The
 refresh waits up to 30 seconds for another git process's ``index.lock``; if it
 still cannot run, the commit stands, and the helper prints it and exits 3,
 naming the ``git reset`` that finishes the refresh.  Until that runs, a commit
@@ -804,6 +806,10 @@ def commit_exact(
         tree = git_text(repo, "write-tree", index=index)
         if snapshot_tree and tree != snapshot_tree:
             raise CommitError(f"重放得到的 tree {tree} 不等于快照提交的 tree {snapshot_tree}，没有提交")
+        whitespace = git(repo, "diff", "--check", expected, tree, allowed=(0, 1, 2))
+        if whitespace.returncode != 0:
+            detail = (whitespace.stdout + whitespace.stderr).decode("utf-8", errors="replace").strip()
+            raise CommitError(f"私有 tree 未通过 git diff --check，没有提交：{detail}")
         if git_text(repo, "rev-parse", "--verify", "HEAD") != expected:
             raise CommitError(f"HEAD 在准备期间离开了 {expected}，没有提交")
         git(repo, "commit", "-q", "-F", "-", data=message, index=index)
