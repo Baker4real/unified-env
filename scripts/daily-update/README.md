@@ -268,7 +268,7 @@ python -B scripts/daily-update/shared-skill-delivery.py register --run-directory
 python -B scripts/daily-update/shared-skill-delivery.py deliver --run-directory <当次目录> --receipt delivery/<skill>-hosts.json --transaction-manifest <同一manifest> --name <skill> --preset cordis --cwd <使用工作区> --model-invocable no --user-invocable yes --like <同一技能>
 ~~~
 
-示例采用手动调用。按该候选的已审阅策略填写两项调用标志。用户指定宿主时，用 `--agents dsh,<宿主列表>` 代替 `--like`。本机受管入口支持 `dsh`、`claude`、`claude-desktop`、`codex`、`kimi` 和 `antigravity`。`register` 首轮登记 `dsh`，`deliver` 在分发前再实测正文加载和调用策略，`verify` 只读核验已经分发的同一载荷。在失败收据中查看阶段和原因；只有排除需人工核查的写入后再重试。
+示例采用手动调用。按该候选的已审阅策略填写两项调用标志。用户指定宿主时，用 `--agents 'dsh,<宿主列表>'` 代替 `--like`（PowerShell 逗号列表须加单引号）。本机受管入口支持 `dsh`、`claude`、`claude-desktop`、`codex`、`kimi` 和 `antigravity`。`register` 首轮登记 `dsh`，`deliver` 在分发前再实测正文加载和调用策略，`verify` 只读核验已经分发的同一载荷。在失败收据中查看阶段和原因；只有排除需人工核查的写入后再重试。
 
 验收探针用已安装的 Harness SDK，在隔离作用域核验 Desktop 预设的技能发现与正文加载。Magpie 分发同时核对勾选、应用记录、宿主链接或副本，以及实际写入收据 `magpie_write_audits`。
 
@@ -290,7 +290,7 @@ API 调用方启动 `magpie-scoped-library.exe web --library-scoped --addr 127.0
 MCP 操作指定已登记服务器名称与宿主 ID，并选择 `--enable` 或 `--disable`。以下命令使用已有的当次证据目录，回执名称须为新文件。
 
 ~~~powershell
-python -B scripts/daily-update/shared-skill-delivery.py scoped-mcp --run-directory <当次目录> --receipt delivery/mcp-antigravity.json --agents antigravity --servers <服务器名称> --enable
+python -B scripts/daily-update/shared-skill-delivery.py scoped-mcp --run-directory <当次目录> --receipt delivery/mcp-antigravity.json --agents 'antigravity' --servers '<服务器名称>' --enable
 ~~~
 
 `--servers` 限定要修改勾选的服务器。Magpie 应用所选宿主的 MCP 配置时也会调和该宿主已有的待同步条目。
@@ -301,7 +301,7 @@ python -B scripts/daily-update/shared-skill-delivery.py scoped-mcp --run-directo
 
 手工调用限定范围的批量分发也用同一审计，例如 MCP 动作的目标 ID 为 `antigravity`。
 
-1. 操作前执行 `python -B scripts/daily-update/shared-skill-delivery.py audit-before --kind mcp --agents antigravity`，确认 `preflight-ready`，将 JSON 保存在当次 D 盘证据目录。审计单个技能时改用 `--kind skill --name <技能名>`。
+1. 操作前执行 `python -B scripts/daily-update/shared-skill-delivery.py audit-before --kind mcp --agents 'antigravity'`，确认 `preflight-ready`，将 JSON 保存在当次 D 盘证据目录。审计单个技能时仍须显式传 `--agents`：`--kind skill --name <技能名> --agents 'dsh,claude,claude-desktop,codex,kimi,antigravity'`（单次输出约 5 KB 全宿主指纹；同轮核对多个技能时落盘或经管道只投影 `ok`/`status` 与目标 `*.skill` 指纹）。
 2. 仅执行已经授权的分发。将上一步 JSON 放入 `before`，把本次动作回执投影到 `result`：`changed` 只保留已登记宿主 ID（未映射用 `null`），`problems` 每项只保留 `{ "agent": "<ID>" }`（未知用空字符串），可另附 `backup_reported` 布尔。不保存原始配置、问题消息、备份路径或认证头。没有动作回执时填 `result: null`。
 3. 将 `{ "before": …, "result": … }` 从 stdin 传入 `python -B scripts/daily-update/shared-skill-delivery.py audit-after`。`observed-within-scope` 表示回执与已覆盖文件的指纹相符；`review-required` 或非零退出表示不能确认。两个审计入口只读本机文件，不执行 Magpie 同步。
 
